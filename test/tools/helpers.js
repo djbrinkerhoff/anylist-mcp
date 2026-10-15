@@ -180,8 +180,8 @@ export class MockAnyListClient {
     return { recipesSaved, linesChanged, unmatched };
   }
 
-  async getAllIngredients() {
-    return this._recipes.flatMap(r => (r.ingredients || []).map(i => ({
+  async getAllIngredients(since = null) {
+    return this._recipes.filter(r => !since || (r.creationTimestamp && r.creationTimestamp * 1000 >= since.getTime())).flatMap(r => (r.ingredients || []).map(i => ({
       recipeId: r.identifier, recipeName: r.name, name: i.name || null, quantity: i.quantity || null,
       note: i.note || null, rawIngredient: i.rawIngredient || null, isHeading: !!i.isHeading,
     })));

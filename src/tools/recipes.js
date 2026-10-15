@@ -20,7 +20,7 @@ export function register(server, getClient) {
 When several recipes share a name, get/update/delete fail and list their ids; pass recipe_id to pick one.
 - import_url: Import a recipe from a website URL (parses ingredients, steps, etc.)
 - normalize: Preview/parse a recipe from a URL or raw text without saving (set save=true to also save)
-- list_ingredients: Every ingredient line across all recipes (recipe id, name, quantity, note, text). Use 'search' to filter by name or text.
+- list_ingredients: Every ingredient line across all recipes (recipe id, name, quantity, note, text). Use 'search' to filter by name or text, and 'since' to limit to recipes added on or after a date.
 - update_ingredients: Edit ingredient lines in place across recipes. Each change names a recipe_id and the line's current text ('match'), then any of text, name, quantity, note, is_heading. Other fields and the line's position are kept.`,
     inputSchema: {
       action: z.enum(["list", "get", "create", "update", "delete", "import_url", "normalize", "list_ingredients", "update_ingredients"]).describe("The recipe action to perform"),
@@ -28,6 +28,7 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
       recipe_id: z.string().optional().describe("Recipe id from list (get, update, delete); takes precedence over name"),
       new_name: z.string().optional().describe("New name for the recipe (update only)"),
       search: z.string().optional().describe("Search query to filter recipes (list) or ingredients by name or text (list_ingredients)"),
+      since: z.string().optional().describe("Only recipes added on or after this date, YYYY-MM-DD or an ISO timestamp (list_ingredients only)"),
       ingredients: z.array(z.object({
         name: z.string().describe("Ingredient name, e.g. 'flour'"),
         quantity: z.string().describe("Quantity with unit, e.g. '2 cups'"),
@@ -53,7 +54,7 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
       })).max(500).optional().describe("Ingredient edits (update_ingredients only), at most 500 per call"),
     }
   }, async (params) => {
-    const { action, name, recipe_id, ingredient_changes, new_name, search, ingredients, steps, note, source_name, source_url, prep_time, cook_time, servings, url, text: recipeText, save: saveRecipe } = params;
+    const { action, name, recipe_id, ingredient_changes, new_name, search, since, ingredients, steps, note, source_name, source_url, prep_time, cook_time, servings, url, text: recipeText, save: saveRecipe } = params;
     try {
       const client = await getClient();
       await client.connect(null);
@@ -84,12 +85,14 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
           return textResponse(text);
         }
         case "list_ingredients": {
-          let ingredients = await client.getAllIngredients();
+          const sinceDate = since ? new Date(since) : null;
+          if (sinceDate && isNaN(sinceDate)) throw new Error(`"since" must be a date like 2026-10-01, not "${since}"`);
+          let ingredients = await client.getAllIngredients(sinceDate);
           if (search) {
             const q = search.toLowerCase();
             ingredients = ingredients.filter(i => [i.name, i.rawIngredient].some(v => v && v.toLowerCase().includes(q)));
           }
-          if (ingredients.length === 0) return textResponse(search ? `No ingredients found matching "${search}".` : "No ingredients found.");
+          if (ingredients.length === 0) return textResponse(search ? `No ingredients found matching "${search}".` : since ? `No recipes added since ${since}.` : "No ingredients found.");
           // Tab-separated so large exports stay easy to parse.
           const clean = v => (v || '').replace(/[\t\n]/g, ' ');
           const rows = ingredients.map(i => [i.recipeId, i.isHeading ? 'heading' : 'ingredient', i.name, i.quantity, i.note, i.rawIngredient].map(clean).join('\t'));

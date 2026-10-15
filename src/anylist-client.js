@@ -486,13 +486,17 @@ class AnyListClient {
   /**
    * Every ingredient line of every recipe, with its recipe. Section headings
    * ("For the sauce") are included with isHeading set.
+   * @param {Date|null} since - only recipes added at or after this time. Recipes
+   *   with no creation time (some very old ones) never match: their other
+   *   timestamp changes on every edit, so it can't stand in.
    */
-  async getAllIngredients() {
+  async getAllIngredients(since = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
-      const recipes = await this.client.getRecipes();
+      let recipes = await this.client.getRecipes();
+      if (since) recipes = recipes.filter(r => r.creationTimestamp && r.creationTimestamp * 1000 >= since.getTime());
       return recipes.flatMap(r => (r.ingredients || []).map(i => {
         const ing = i.toJSON();
         return {

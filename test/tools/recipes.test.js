@@ -267,6 +267,23 @@ describe('recipes tool', () => {
       assert.ok(text.includes('r-1\tingredient\tgarlic cloves\t2\tminced\t2 garlic cloves, minced'));
     });
 
+    it('limits to recipes added since a date', async () => {
+      client._recipes[0].creationTimestamp = Date.parse('2026-09-01') / 1000;
+      client._recipes[1].creationTimestamp = Date.parse('2026-10-10') / 1000;
+      const text = (await handlers.recipes({ action: 'list_ingredients', since: '2026-10-01' })).content[0].text;
+      assert.ok(text.startsWith('Ingredients (1)'));
+      assert.ok(text.includes('r-2'));
+      delete client._recipes[1].creationTimestamp; // very old recipes have none
+      assert.ok((await handlers.recipes({ action: 'list_ingredients', since: '2026-10-01' })).content[0].text.includes('No recipes added since'));
+      const none = (await handlers.recipes({ action: 'list_ingredients', since: '2026-11-01' })).content[0].text;
+      assert.ok(none.includes('No recipes added since 2026-11-01'));
+    });
+
+    it('rejects a since value that is not a date', async () => {
+      const result = await handlers.recipes({ action: 'list_ingredients', since: 'last week' });
+      assert.equal(result.isError, true);
+    });
+
     it('filters by name or text with search', async () => {
       const text = (await handlers.recipes({ action: 'list_ingredients', search: 'garlic' })).content[0].text;
       assert.ok(text.startsWith('Ingredients (2)'));

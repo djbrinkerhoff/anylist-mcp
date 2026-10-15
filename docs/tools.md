@@ -98,6 +98,7 @@ Manage AnyList recipes, including URL import and text parsing.
 | `url` | string | For import/normalize | URL to fetch recipe from |
 | `text` | string | For normalize | Raw recipe text to parse |
 | `save` | boolean | No | Save normalized result to AnyList (normalize only) |
+| `since` | string | No | Only recipes added on or after this date, `YYYY-MM-DD` (list_ingredients only) |
 | `ingredient_changes` | array | For update_ingredients | Up to 500 `{ recipe_id, match, text?, name?, quantity?, note?, is_heading? }` |
 
 **Actions:**
@@ -137,8 +138,10 @@ Manage AnyList recipes, including URL import and text parsing.
 { "name": "recipes", "arguments": { "action": "delete", "name": "Simple Pasta" } }
 
 // Every ingredient line across all recipes, as tab-separated rows
-// (recipe id, kind, name, quantity, note, stored text). search filters by name or text.
+// (recipe id, kind, name, quantity, note, stored text). search filters by name or text;
+// since limits it to recipes added on or after a date.
 { "name": "recipes", "arguments": { "action": "list_ingredients", "search": "garlic" } }
+{ "name": "recipes", "arguments": { "action": "list_ingredients", "since": "2026-10-01" } }
 
 // Edit ingredient lines in place. Each change finds a line by its current stored text
 // ("match") in one recipe and sets only the fields given; the line keeps its position.
