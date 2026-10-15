@@ -6,7 +6,7 @@ the workflow and the testing bar that every contribution is held to.
 ## Getting started
 
 ```bash
-git clone --recurse-submodules https://github.com/bobby060/anylist-mcp.git
+git clone --recurse-submodules https://github.com/djbrinkerhoff/anylist-mcp.git
 cd anylist-mcp
 make install
 ```

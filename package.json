@@ -23,7 +23,11 @@
     "shopping",
     "list"
   ],
-  "author": "",
+  "author": "DJ Brinkerhoff",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djbrinkerhoff/anylist-mcp.git"
+  },
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",

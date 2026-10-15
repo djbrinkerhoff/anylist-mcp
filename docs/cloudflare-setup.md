@@ -10,7 +10,7 @@ This guide covers two scenarios:
 
 Clone the repo with submodules (required — the AnyList JS library is a git submodule):
 ```bash
-git clone --recurse-submodules https://github.com/bobby060/anylist-mcp.git
+git clone --recurse-submodules https://github.com/djbrinkerhoff/anylist-mcp.git
 cd anylist-mcp
 ```
 
