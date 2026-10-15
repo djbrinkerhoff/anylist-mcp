@@ -26,13 +26,16 @@ Manage shopping lists and items.
 |-----------|------|----------|-------------|
 | `action` | enum | Yes | See actions below |
 | `list_name` | string | No | Target list (defaults to configured default) |
-| `name` | string | For item actions | Item name |
-| `quantity` | number | No | Item quantity (add_item only, default 1) |
+| `name` | string | For item actions | Item name (add_item, check_item, uncheck_item, delete_item) |
+| `items` | array | For add_items | Items to add; each is a plain name or `{ name, quantity, notes, category, store_name }` |
+| `quantity` | number \| string | No | e.g. `2` or `"500 g"` (add_item only, default 1) |
 | `notes` | string | No | Item notes (add_item only) |
+| `category` | enum | No | Category for item (add_item only, default `other`) — see below |
+| `store_name` | string | No | Store to assign to the item (add_item only); must be one of the list's stores |
 | `include_checked` | boolean | No | Include checked-off items (list_items only) |
 | `include_notes` | boolean | No | Include item notes in output (list_items only) |
-| `store_name` | string | No | Filter items by store (add_items, set_item_category only) |
-| `category` | string | No | Category for item (add_item only) |
+
+**Categories:** `baby`, `bakery`, `beverages`, `breakfast-and-cereal`, `condiments-oils-and-salad-dressings`, `cooking-and-baking`, `dairy`, `frozen-foods`, `grains-pasta-and-side-dishes`, `health-and-personal-care`, `household-and-cleaning`, `meat`, `pet-supplies`, `produce`, `seafood`, `snacks-cookies-and-candy`, `soups-and-canned-goods`, `wine-beer-spirits`, `other`
 
 **Actions:**
 
@@ -44,7 +47,13 @@ Manage shopping lists and items.
 { "name": "shopping", "arguments": { "action": "list_items", "list_name": "Costco", "include_notes": true } }
 
 // Add an item
-{ "name": "shopping", "arguments": { "action": "add_item", "name": "Eggs", "quantity": 2, "notes": "organic", "store": "Costco"} }
+{ "name": "shopping", "arguments": { "action": "add_item", "name": "Eggs", "quantity": 2, "notes": "organic", "category": "dairy", "store_name": "Costco" } }
+
+// Add several items in one call
+{ "name": "shopping", "arguments": { "action": "add_items", "items": [
+    "Bananas",
+    { "name": "Flour", "quantity": "2 kg", "category": "cooking-and-baking" }
+] } }
 
 // Check off an item (supports partial name matching)
 { "name": "shopping", "arguments": { "action": "check_item", "name": "Eggs" } }
@@ -61,10 +70,8 @@ Manage shopping lists and items.
 // Get recently added items for a list
 { "name": "shopping", "arguments": { "action": "get_recents" } }
 
-// Set store for an item
-{ "name": "shopping", "arguments": { "action": "set_item_store", "name": "Milk", "store_name": "Costco" } }
-
-// Set category for an item
+// List the stores configured for a list
+{ "name": "shopping", "arguments": { "action": "list_stores" } }
 ```
 
 ---
@@ -77,6 +84,7 @@ Manage AnyList recipes, including URL import and text parsing.
 |-----------|------|----------|-------------|
 | `action` | enum | Yes | See actions below |
 | `name` | string | For most actions | Recipe name |
+| `recipe_id` | string | No | Recipe ID from `list` (get, update, delete) — use when several recipes share a name |
 | `new_name` | string | No | Rename the recipe (update only) |
 | `search` | string | No | Filter recipes by name (list only) |
 | `ingredients` | array | No | `[{ name, quantity }]` (create, update — replaces list on update) |
@@ -144,18 +152,24 @@ Manage the AnyList meal planning calendar.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `action` | enum | Yes | See actions below |
-| `date` | string | For create | Date in `YYYY-MM-DD` format |
+| `date` | string | For create | Date in `YYYY-MM-DD` format (create_event, update_event) |
 | `title` | string | No | Event title (use this or `recipe_id`) |
 | `recipe_id` | string | No | Link an existing recipe by ID |
 | `label_id` | string | No | Meal type label ID (get from `list_labels`) |
 | `details` | string | No | Additional notes |
-| `event_id` | string | For delete | Event ID to delete |
+| `event_id` | string | For update, delete | Event ID (shown by `list_events`) |
+| `start_date` | string | No | Only events on or after this date, `YYYY-MM-DD` (list_events only) |
+| `end_date` | string | No | Only events on or before this date, `YYYY-MM-DD` (list_events only) |
 
 **Actions:**
 
 ```json
-// View all meal plan events, sorted by date
+// View all meal plan events, sorted by date. Each line shows the event id,
+// plus the linked recipe's id when there is one.
 { "name": "meal_plan", "arguments": { "action": "list_events" } }
+
+// View events in a date range
+{ "name": "meal_plan", "arguments": { "action": "list_events", "start_date": "2025-02-10", "end_date": "2025-02-16" } }
 
 // Get available labels (Breakfast, Lunch, Dinner, etc.) with their IDs
 { "name": "meal_plan", "arguments": { "action": "list_labels" } }
@@ -167,6 +181,10 @@ Manage the AnyList meal planning calendar.
     "title": "Pizza Night",
     "label_id": "<id from list_labels>"
 } }
+
+// Change an event — only the fields you pass change. AnyList can't change an
+// event's date or recipe in place, so this replaces the event and returns its new id.
+{ "name": "meal_plan", "arguments": { "action": "update_event", "event_id": "<id>", "date": "2025-02-16", "recipe_id": "<recipe id>" } }
 
 // Delete an event
 { "name": "meal_plan", "arguments": { "action": "delete_event", "event_id": "<id>" } }
@@ -180,14 +198,17 @@ Organize recipes into named collections.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `action` | enum | Yes | `list` or `create` |
-| `name` | string | For create | Collection name |
-| `recipe_names` | string[] | No | Recipes to include on creation |
+| `action` | enum | Yes | `list`, `create`, `delete`, `add_recipes`, or `remove_recipes` |
+| `name` | string | For create | Collection name (delete, add_recipes, remove_recipes take `name` or `collection_id`) |
+| `collection_id` | string | No | Collection ID from `list` — use when several collections share a name |
+| `recipe_names` | string[] | For add/remove | Recipes to include (create, add_recipes) or take out (remove_recipes) |
+
+Recipe names that match no recipe, or more than one recipe, are skipped and listed in the response.
 
 **Actions:**
 
 ```json
-// List all collections
+// List all collections with their ids
 { "name": "recipe_collections", "arguments": { "action": "list" } }
 
 // Create a collection
@@ -196,6 +217,15 @@ Organize recipes into named collections.
     "name": "Weeknight Dinners",
     "recipe_names": ["Simple Pasta", "Chicken Tikka Masala"]
 } }
+
+// Add recipes to an existing collection (ones already in it are left alone)
+{ "name": "recipe_collections", "arguments": { "action": "add_recipes", "name": "Weeknight Dinners", "recipe_names": ["Kimchi Fried Rice"] } }
+
+// Remove recipes from a collection (the recipes themselves are kept)
+{ "name": "recipe_collections", "arguments": { "action": "remove_recipes", "name": "Weeknight Dinners", "recipe_names": ["Simple Pasta"] } }
+
+// Delete a collection (the recipes themselves are kept)
+{ "name": "recipe_collections", "arguments": { "action": "delete", "name": "Weeknight Dinners" } }
 ```
 
 ---
