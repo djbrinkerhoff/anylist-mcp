@@ -225,5 +225,40 @@ describe('recipes tool', () => {
       const result = await handlers.recipes({ action: 'delete', name: 'Nope' });
       assert.equal(result.isError, true);
     });
+
+    it('refuses an ambiguous name and lists the ids', async () => {
+      client._recipes.push({ identifier: 'r-1', name: 'Pasta' }, { identifier: 'r-2', name: 'Pasta' });
+      const result = await handlers.recipes({ action: 'delete', name: 'Pasta' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('r-1, r-2'));
+      assert.equal(client._recipes.length, 2);
+    });
+
+    it('deletes only the recipe with the given recipe_id', async () => {
+      client._recipes.push({ identifier: 'r-1', name: 'Pasta' }, { identifier: 'r-2', name: 'Pasta' });
+      const result = await handlers.recipes({ action: 'delete', recipe_id: 'r-2' });
+      assert.ok(result.content[0].text.includes('Deleted recipe'));
+      assert.deepEqual(client._recipes.map(r => r.identifier), ['r-1']);
+    });
+  });
+
+  describe('recipe_id', () => {
+    it('gets a recipe by id when names are duplicated', async () => {
+      client._recipes.push({ identifier: 'r-1', name: 'Pasta', note: 'first' }, { identifier: 'r-2', name: 'Pasta', note: 'second' });
+      const result = await handlers.recipes({ action: 'get', recipe_id: 'r-2' });
+      assert.ok(result.content[0].text.includes('second'));
+    });
+
+    it('updates a recipe by id when names are duplicated', async () => {
+      client._recipes.push({ identifier: 'r-1', name: 'Pasta' }, { identifier: 'r-2', name: 'Pasta' });
+      await handlers.recipes({ action: 'update', recipe_id: 'r-2', new_name: 'Pasta (baked)' });
+      assert.deepEqual(client._recipes.map(r => r.name), ['Pasta', 'Pasta (baked)']);
+    });
+
+    it('returns error for an unknown id', async () => {
+      const result = await handlers.recipes({ action: 'get', recipe_id: 'nope' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('not found'));
+    });
   });
 });

@@ -11,17 +11,18 @@ export function register(server, getClient) {
 - list_events: Show all meal plan events (sorted by date)
 - list_labels: Show available labels (Breakfast, Lunch, Dinner, etc.) with IDs
 - create_event: Add a meal plan event for a date
+- update_event: Change an existing event by ID (only the fields you pass change; the event gets a new ID)
 - delete_event: Delete a meal plan event by ID`,
     inputSchema: {
-      action: z.enum(["list_events", "list_labels", "create_event", "delete_event"]).describe("The meal plan action to perform"),
-      date: z.string().optional().describe("Date in YYYY-MM-DD format (required for create_event)"),
+      action: z.enum(["list_events", "list_labels", "create_event", "update_event", "delete_event"]).describe("The meal plan action to perform"),
+      date: z.string().optional().describe("Date in YYYY-MM-DD format (required for create_event; also update_event)"),
       start_date: z.string().optional().describe("Filter events on or after this date, YYYY-MM-DD (list_events only)"),
       end_date: z.string().optional().describe("Filter events on or before this date, YYYY-MM-DD (list_events only)"),
-      title: z.string().optional().describe("Event title (create_event; use this OR recipe_id)"),
-      recipe_id: z.string().optional().describe("Recipe ID to link (create_event)"),
-      label_id: z.string().optional().describe("Label ID for meal type (create_event)"),
-      details: z.string().optional().describe("Additional notes (create_event)"),
-      event_id: z.string().optional().describe("Event ID to delete (required for delete_event)"),
+      title: z.string().optional().describe("Event title (create_event, update_event; use this OR recipe_id)"),
+      recipe_id: z.string().optional().describe("Recipe ID to link (create_event, update_event)"),
+      label_id: z.string().optional().describe("Label ID for meal type (create_event, update_event)"),
+      details: z.string().optional().describe("Additional notes (create_event, update_event)"),
+      event_id: z.string().optional().describe("Event ID (required for update_event, delete_event)"),
     }
   }, async (params) => {
     const { action, date, start_date, end_date, title, recipe_id, label_id, details, event_id } = params;
@@ -41,7 +42,7 @@ export function register(server, getClient) {
             if (e.recipeName) parts.push(`📖 ${e.recipeName}`);
             if (e.labelName) parts.push(`[${e.labelName}]`);
             if (e.details) parts.push(`— ${e.details}`);
-            parts.push(`(id: ${e.identifier})`);
+            parts.push(e.recipeId ? `(id: ${e.identifier}, recipe_id: ${e.recipeId})` : `(id: ${e.identifier})`);
             return parts.join(' ');
           }).join('\n');
           return textResponse(`Meal Plan (${events.length} events):\n${list}`);
@@ -63,6 +64,21 @@ export function register(server, getClient) {
             details: details || null,
           });
           return textResponse(`Created meal plan event for ${result.date}`);
+        }
+        case "update_event": {
+          let eventId = event_id;
+          if (!eventId) eventId = await elicitRequiredField("event_id", "Which event ID should be updated?");
+          const fields = {};
+          if (date !== undefined) fields.date = date;
+          if (title !== undefined) fields.title = title;
+          if (recipe_id !== undefined) fields.recipeId = recipe_id;
+          if (label_id !== undefined) fields.labelId = label_id;
+          if (details !== undefined) fields.details = details;
+          if (Object.keys(fields).length === 0) {
+            return errorResponse('Action "update_event" requires at least one field to change (date, title, recipe_id, label_id, or details).');
+          }
+          const updated = await client.updateMealPlanEvent(eventId, fields);
+          return textResponse(`Updated meal plan event ${eventId} (new id: ${updated.identifier})`);
         }
         case "delete_event": {
           let eventId = event_id;

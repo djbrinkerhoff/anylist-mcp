@@ -397,6 +397,28 @@ class AnyListClient {
 
   // ===== RECIPES =====
 
+  /**
+   * Find the one recipe matching `recipeId` (exact identifier) or, when no id
+   * is given, `recipeName` (case-insensitive). Throws if none match, or if the
+   * name matches several recipes — listing their ids so the caller can retry
+   * with one.
+   */
+  _findRecipe(recipes, recipeName, recipeId = null) {
+    if (recipeId) {
+      const recipe = recipes.find(r => r.identifier === recipeId);
+      if (!recipe) throw new Error(`Recipe with id "${recipeId}" not found`);
+      return recipe;
+    }
+    const matches = recipes.filter(r => r.name && r.name.toLowerCase() === recipeName.toLowerCase());
+    if (matches.length === 0) {
+      throw new Error(`Recipe "${recipeName}" not found`);
+    }
+    if (matches.length > 1) {
+      throw new Error(`Multiple recipes named "${recipeName}" (${matches.length}) exist (ids: ${matches.map(r => r.identifier).join(', ')}). Pass recipe_id to choose one.`);
+    }
+    return matches[0];
+  }
+
   async getRecipes(searchQuery = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
@@ -426,16 +448,13 @@ class AnyListClient {
     }
   }
 
-  async getRecipeDetails(recipeName) {
+  async getRecipeDetails(recipeName, recipeId = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
       const recipes = await this.client.getRecipes();
-      const recipe = recipes.find(r => r.name && r.name.toLowerCase() === recipeName.toLowerCase());
-      if (!recipe) {
-        throw new Error(`Recipe "${recipeName}" not found`);
-      }
+      const recipe = this._findRecipe(recipes, recipeName, recipeId);
       return {
         identifier: recipe.identifier,
         name: recipe.name,
@@ -590,21 +609,15 @@ class AnyListClient {
    * @param {object} fields - subset of { name, note, sourceName, sourceUrl,
    *   prepTime, cookTime, servings, ingredients, preparationSteps }; keys with an
    *   `undefined` value are ignored. `name` renames the recipe in place.
+   * @param {string|null} recipeId - identifier to target instead of the name
    */
-  async updateRecipe(recipeName, fields = {}) {
+  async updateRecipe(recipeName, fields = {}, recipeId = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
       const recipes = await this.client.getRecipes();
-      const matches = recipes.filter(r => r.name && r.name.toLowerCase() === recipeName.toLowerCase());
-      if (matches.length === 0) {
-        throw new Error(`Recipe "${recipeName}" not found`);
-      }
-      if (matches.length > 1) {
-        throw new Error(`Multiple recipes named "${recipeName}" (${matches.length}) exist. Rename or remove the duplicates so the target is unambiguous, then try again.`);
-      }
-      const existing = matches[0];
+      const existing = this._findRecipe(recipes, recipeName, recipeId);
       if (fields.name !== undefined && recipes.some(r => r !== existing && r.name && r.name.toLowerCase() === fields.name.toLowerCase())) {
         throw new Error(`Cannot rename to "${fields.name}": a recipe with that name already exists.`);
       }
@@ -653,16 +666,13 @@ class AnyListClient {
     }
   }
 
-  async deleteRecipe(recipeName) {
+  async deleteRecipe(recipeName, recipeId = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
       const recipes = await this.client.getRecipes();
-      const recipe = recipes.find(r => r.name && r.name.toLowerCase() === recipeName.toLowerCase());
-      if (!recipe) {
-        throw new Error(`Recipe "${recipeName}" not found`);
-      }
+      const recipe = this._findRecipe(recipes, recipeName, recipeId);
       await recipe.delete();
       console.error(`Deleted recipe: ${recipe.name}`);
     } catch (error) {
@@ -726,6 +736,41 @@ class AnyListClient {
       return { identifier: event.identifier, date: date };
     } catch (error) {
       throw new Error(`Failed to create meal plan event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Change only the provided fields of an existing event. AnyList's in-place
+   * update (`set-event-details`) ignores date and recipe changes, so this saves
+   * a new event with the merged fields and deletes the old one; the event id
+   * changes.
+   * @param {object} fields - subset of { date, title, recipeId, labelId, details };
+   *   `undefined` keys are ignored, `null` clears the field.
+   */
+  async updateMealPlanEvent(eventId, fields = {}) {
+    if (!this.client) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const events = await this.client.getMealPlanningCalendarEvents();
+      const old = events.find(e => e.identifier === eventId);
+      if (!old) {
+        throw new Error(`Meal plan event "${eventId}" not found`);
+      }
+      const pick = key => (fields[key] !== undefined ? fields[key] : old[key]);
+      const event = await this.client.createEvent({
+        date: fields.date !== undefined ? new Date(`${fields.date}T12:00:00`) : old.date,
+        title: pick('title') || undefined,
+        recipeId: pick('recipeId') || undefined,
+        labelId: pick('labelId') || undefined,
+        details: pick('details') || undefined,
+      });
+      await event.save();
+      await old.delete();
+      console.error(`Replaced meal plan event ${eventId} with ${event.identifier}`);
+      return { identifier: event.identifier };
+    } catch (error) {
+      throw new Error(`Failed to update meal plan event: ${error.message}`);
     }
   }
 
@@ -810,42 +855,125 @@ class AnyListClient {
     }
   }
 
+  /**
+   * Map recipe names to ids. A name matching no recipe goes in `missing`;
+   * a name shared by several recipes goes in `ambiguous` (use distinct names).
+   */
+  _resolveRecipeNames(recipes, recipeNames) {
+    const ids = [];
+    const missing = [];
+    const ambiguous = [];
+    for (const rName of recipeNames) {
+      const matches = recipes.filter(r => r.name && r.name.toLowerCase() === rName.toLowerCase());
+      if (matches.length === 0) missing.push(rName);
+      else if (matches.length > 1) ambiguous.push(rName);
+      else ids.push(matches[0].identifier);
+    }
+    return { ids, missing, ambiguous };
+  }
+
+  /**
+   * Load recipes and the one collection matching `collectionId` or `name`.
+   * Loading recipes also sets client.recipeDataId, which every collection
+   * operation needs: without it AnyList accepts the request but does nothing.
+   */
+  async _loadRecipeCollection(name, collectionId = null) {
+    const recipes = await this.client.getRecipes();
+    const userData = await this.client._getUserData(false);
+    const collections = userData.recipeDataResponse.recipeCollections || [];
+    if (collectionId) {
+      const raw = collections.find(c => c.identifier === collectionId);
+      if (!raw) throw new Error(`Recipe collection with id "${collectionId}" not found`);
+      return { recipes, raw };
+    }
+    const matches = collections.filter(c => c.name && c.name.toLowerCase() === name.toLowerCase());
+    if (matches.length === 0) throw new Error(`Recipe collection "${name}" not found`);
+    if (matches.length > 1) {
+      throw new Error(`Multiple collections named "${name}" (${matches.length}) exist (ids: ${matches.map(c => c.identifier).join(', ')}). Pass collection_id to choose one.`);
+    }
+    return { recipes, raw: matches[0] };
+  }
+
+  _collectionWithRecipeIds(raw, recipeIds) {
+    return this.client.createRecipeCollection({
+      identifier: raw.identifier,
+      timestamp: raw.timestamp,
+      name: raw.name,
+      recipeIds,
+      collectionSettings: raw.collectionSettings,
+    });
+  }
+
   async createRecipeCollection(name, recipeNames = []) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
-      const recipeIds = [];
-      if (recipeNames.length > 0) {
-        const recipes = await this.client.getRecipes();
-        for (const rName of recipeNames) {
-          const r = recipes.find(r => r.name && r.name.toLowerCase() === rName.toLowerCase());
-          if (r) recipeIds.push(r.identifier);
-        }
-      }
-      const collection = this.client.createRecipeCollection({ name, recipeIds });
+      // Always load recipes: it sets the recipeDataId the save needs.
+      const recipes = await this.client.getRecipes();
+      const { ids, missing, ambiguous } = this._resolveRecipeNames(recipes, recipeNames);
+      const collection = this.client.createRecipeCollection({ name, recipeIds: ids });
       await collection.save();
       console.error(`Created recipe collection: ${name}`);
-      return { identifier: collection.identifier, name: collection.name };
+      return { identifier: collection.identifier, name: collection.name, recipeCount: ids.length, missing, ambiguous };
     } catch (error) {
       throw new Error(`Failed to create recipe collection: ${error.message}`);
     }
   }
 
-  async deleteRecipeCollection(name) {
+  async deleteRecipeCollection(name, collectionId = null) {
     if (!this.client) {
       throw new Error('Not connected. Call connect() first.');
     }
     try {
-      const userData = await this.client._getUserData(true);
-      const collections = userData.recipeDataResponse.recipeCollections || [];
-      const raw = collections.find(c => c.name && c.name.toLowerCase() === name.toLowerCase());
-      if (!raw) throw new Error(`Recipe collection "${name}" not found`);
-      const collection = this.client.createRecipeCollection(raw);
-      await collection.delete();
-      console.error(`Deleted recipe collection: ${name}`);
+      const { raw } = await this._loadRecipeCollection(name, collectionId);
+      await this._collectionWithRecipeIds(raw, raw.recipeIds || []).delete();
+      console.error(`Deleted recipe collection: ${raw.name}`);
+      return { identifier: raw.identifier, name: raw.name };
     } catch (error) {
       throw new Error(`Failed to delete recipe collection: ${error.message}`);
+    }
+  }
+
+  async addRecipesToCollection(name, recipeNames, collectionId = null) {
+    if (!this.client) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const { recipes, raw } = await this._loadRecipeCollection(name, collectionId);
+      const { ids, missing, ambiguous } = this._resolveRecipeNames(recipes, recipeNames);
+      const existing = raw.recipeIds || [];
+      const toAdd = [...new Set(ids.filter(id => !existing.includes(id)))];
+      if (toAdd.length > 0) {
+        await this._collectionWithRecipeIds(raw, [...existing, ...toAdd]).performOperation('add-recipes-to-collection');
+      }
+      console.error(`Added ${toAdd.length} recipes to collection: ${raw.name}`);
+      return { name: raw.name, added: toAdd.length, alreadyIn: ids.length - toAdd.length, missing, ambiguous };
+    } catch (error) {
+      throw new Error(`Failed to add recipes to collection: ${error.message}`);
+    }
+  }
+
+  async removeRecipesFromCollection(name, recipeNames, collectionId = null) {
+    if (!this.client) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const { recipes, raw } = await this._loadRecipeCollection(name, collectionId);
+      const existing = raw.recipeIds || [];
+      // Resolve against the collection's own recipes, so a name shared with a
+      // recipe outside the collection is still unambiguous here.
+      const members = recipes.filter(r => existing.includes(r.identifier));
+      const { ids, missing, ambiguous } = this._resolveRecipeNames(members, recipeNames);
+      const toRemove = [...new Set(ids)];
+      if (toRemove.length > 0) {
+        // The operation removes the recipe ids it is given.
+        await this._collectionWithRecipeIds(raw, toRemove).performOperation('remove-recipes-from-collection');
+      }
+      console.error(`Removed ${toRemove.length} recipes from collection: ${raw.name}`);
+      return { name: raw.name, removed: toRemove.length, notInCollection: missing, ambiguous };
+    } catch (error) {
+      throw new Error(`Failed to remove recipes from collection: ${error.message}`);
     }
   }
 

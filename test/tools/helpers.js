@@ -124,9 +124,20 @@ export class MockAnyListClient {
     return r;
   }
 
-  async getRecipeDetails(name) {
-    const r = this._recipes.find(x => x.name.toLowerCase() === name.toLowerCase());
-    if (!r) throw new Error(`Recipe "${name}" not found`);
+  _findRecipe(name, id = null) {
+    if (id) {
+      const r = this._recipes.find(x => x.identifier === id);
+      if (!r) throw new Error(`Recipe with id "${id}" not found`);
+      return r;
+    }
+    const matches = this._recipes.filter(x => x.name && x.name.toLowerCase() === name.toLowerCase());
+    if (matches.length === 0) throw new Error(`Recipe "${name}" not found`);
+    if (matches.length > 1) throw new Error(`Multiple recipes named "${name}" (${matches.length}) exist (ids: ${matches.map(x => x.identifier).join(', ')})`);
+    return matches[0];
+  }
+
+  async getRecipeDetails(name, id = null) {
+    const r = this._findRecipe(name, id);
     return { ...r, ingredients: r.ingredients || [], preparationSteps: r.preparationSteps || [] };
   }
 
@@ -135,21 +146,16 @@ export class MockAnyListClient {
     return { identifier: 'r-1', name: opts.name };
   }
 
-  async updateRecipe(name, fields = {}) {
-    const matches = this._recipes.filter(r => r.name && r.name.toLowerCase() === name.toLowerCase());
-    if (matches.length === 0) throw new Error(`Recipe "${name}" not found`);
-    if (matches.length > 1) throw new Error(`Multiple recipes named "${name}" (${matches.length}) exist`);
-    const r = matches[0];
+  async updateRecipe(name, fields = {}, id = null) {
+    const r = this._findRecipe(name, id);
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined) r[key] = value;
     }
     return { identifier: r.identifier, name: r.name };
   }
 
-  async deleteRecipe(name) {
-    const idx = this._recipes.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
-    if (idx === -1) throw new Error(`Recipe "${name}" not found`);
-    this._recipes.splice(idx, 1);
+  async deleteRecipe(name, id = null) {
+    this._recipes.splice(this._recipes.indexOf(this._findRecipe(name, id)), 1);
   }
 
   async importRecipeFromUrl(url) {
@@ -174,6 +180,16 @@ export class MockAnyListClient {
     return { identifier: 'e-1', date: opts.date };
   }
 
+  async updateMealPlanEvent(id, fields = {}) {
+    const e = this._events.find(x => x.identifier === id);
+    if (!e) throw new Error(`Meal plan event "${id}" not found`);
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) e[key] = value;
+    }
+    e.identifier = `${id}-new`;
+    return { identifier: e.identifier };
+  }
+
   async deleteMealPlanEvent(id) {
     const idx = this._events.findIndex(e => e.identifier === id);
     if (idx === -1) throw new Error(`Meal plan event "${id}" not found`);
@@ -182,15 +198,60 @@ export class MockAnyListClient {
 
   async getRecipeCollections() { return [...this._collections]; }
 
-  async createRecipeCollection(name, recipeNames = []) {
-    const c = { identifier: 'c-1', name, recipeCount: recipeNames.length, recipeNames };
-    this._collections.push(c);
-    return c;
+  _resolveRecipeNames(names) {
+    const found = [];
+    const missing = [];
+    const ambiguous = [];
+    for (const n of names) {
+      const matches = this._recipes.filter(r => r.name.toLowerCase() === n.toLowerCase());
+      if (matches.length === 0) missing.push(n);
+      else if (matches.length > 1) ambiguous.push(n);
+      else found.push(matches[0].name);
+    }
+    return { found, missing, ambiguous };
   }
 
-  async deleteRecipeCollection(name) {
-    const idx = this._collections.findIndex(c => c.name.toLowerCase() === name.toLowerCase());
-    if (idx === -1) throw new Error(`Recipe collection "${name}" not found`);
-    this._collections.splice(idx, 1);
+  _findCollection(name, id = null) {
+    if (id) {
+      const c = this._collections.find(x => x.identifier === id);
+      if (!c) throw new Error(`Recipe collection with id "${id}" not found`);
+      return c;
+    }
+    const matches = this._collections.filter(x => x.name.toLowerCase() === name.toLowerCase());
+    if (matches.length === 0) throw new Error(`Recipe collection "${name}" not found`);
+    if (matches.length > 1) throw new Error(`Multiple collections named "${name}" (${matches.length}) exist (ids: ${matches.map(x => x.identifier).join(', ')})`);
+    return matches[0];
+  }
+
+  async createRecipeCollection(name, recipeNames = []) {
+    const { found, missing, ambiguous } = this._resolveRecipeNames(recipeNames);
+    const c = { identifier: `c-${this._collections.length + 1}`, name, recipeCount: found.length, recipeNames: found };
+    this._collections.push(c);
+    return { ...c, missing, ambiguous };
+  }
+
+  async deleteRecipeCollection(name, id = null) {
+    const c = this._findCollection(name, id);
+    this._collections.splice(this._collections.indexOf(c), 1);
+    return { identifier: c.identifier, name: c.name };
+  }
+
+  async addRecipesToCollection(name, recipeNames, id = null) {
+    const c = this._findCollection(name, id);
+    const { found, missing, ambiguous } = this._resolveRecipeNames(recipeNames);
+    const toAdd = found.filter(n => !c.recipeNames.includes(n));
+    c.recipeNames.push(...toAdd);
+    c.recipeCount = c.recipeNames.length;
+    return { name: c.name, added: toAdd.length, alreadyIn: found.length - toAdd.length, missing, ambiguous };
+  }
+
+  async removeRecipesFromCollection(name, recipeNames, id = null) {
+    const c = this._findCollection(name, id);
+    const lower = recipeNames.map(n => n.toLowerCase());
+    const notInCollection = recipeNames.filter(n => !c.recipeNames.some(r => r.toLowerCase() === n.toLowerCase()));
+    const before = c.recipeNames.length;
+    c.recipeNames = c.recipeNames.filter(r => !lower.includes(r.toLowerCase()));
+    c.recipeCount = c.recipeNames.length;
+    return { name: c.name, removed: before - c.recipeNames.length, notInCollection, ambiguous: [] };
   }
 }

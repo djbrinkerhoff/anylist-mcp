@@ -30,6 +30,12 @@ describe('meal_plan tool', () => {
       assert.ok(t.indexOf('2025-02-08') < t.indexOf('2025-02-10'));
     });
 
+    it('includes the linked recipe id in output', async () => {
+      client._events.push({ identifier: 'e1', date: '2025-03-01', recipeName: 'Chili', recipeId: 'r-7' });
+      const result = await handlers.meal_plan({ action: 'list_events' });
+      assert.ok(result.content[0].text.includes('(id: e1, recipe_id: r-7)'));
+    });
+
     it('includes event identifier in output', async () => {
       client._events.push({ date: '2025-03-01', title: 'Sushi', identifier: 'e-abc' });
       const result = await handlers.meal_plan({ action: 'list_events' });
@@ -101,6 +107,26 @@ describe('meal_plan tool', () => {
       const result = await handlers.meal_plan({ action: 'create_event', date: '2025-03-01' });
       assert.ok(result.content[0].text.includes('Created meal plan event'));
       assert.equal(client._events.length, 1);
+    });
+  });
+
+  describe('update_event', () => {
+    it('changes only the provided fields', async () => {
+      client._events.push({ identifier: 'e1', date: '2025-03-01', recipeId: 'r-old', details: 'keep me' });
+      const result = await handlers.meal_plan({ action: 'update_event', event_id: 'e1', recipe_id: 'r-new' });
+      assert.ok(result.content[0].text.includes('Updated meal plan event e1 (new id: e1-new)'));
+      assert.deepEqual(client._events[0], { identifier: 'e1-new', date: '2025-03-01', recipeId: 'r-new', details: 'keep me' });
+    });
+
+    it('returns error when no fields are provided', async () => {
+      client._events.push({ identifier: 'e1', date: '2025-03-01' });
+      const result = await handlers.meal_plan({ action: 'update_event', event_id: 'e1' });
+      assert.equal(result.isError, true);
+    });
+
+    it('returns error for non-existent event', async () => {
+      const result = await handlers.meal_plan({ action: 'update_event', event_id: 'bad', title: 'x' });
+      assert.equal(result.isError, true);
     });
   });
 
