@@ -112,13 +112,20 @@ async function submitAuthorize(request, env) {
   const client = await env.OAUTH_PROVIDER.lookupClient(approved.request.clientId);
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: approved.request,
-    userId: encodeURIComponent(email.toLowerCase()),
+    // Opaque ID: it appears inside authorization codes and tokens, and some clients
+    // reject codes containing percent-encoded characters.
+    userId: await userIdFor(email),
     metadata: { clientName: client?.clientName || approved.request.clientId },
     scope: SCOPES,
     props: { email, password, defaultList },
   });
 
   return redirect(redirectTo, approved.headers);
+}
+
+async function userIdFor(email) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email.trim().toLowerCase()));
+  return [...new Uint8Array(digest)].slice(0, 16).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
