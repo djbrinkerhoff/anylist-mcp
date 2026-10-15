@@ -76,7 +76,10 @@ async function submitAuthorize(request, env) {
   const password = String(form.get("password") || "");
   const defaultList = String(form.get("default_list") || "").trim() || null;
   const action = `${new URL(request.url).origin}/authorize`;
-  const retry = error => html(authorizePage({ handle, consent, action, email, defaultList, error }), 400);
+  const retry = error => {
+    console.log(`[authorize] rejected: ${error}`);
+    return html(authorizePage({ handle, consent, action, email, defaultList, error }), 400);
+  };
 
   if (!email || !password) return retry("AnyList email and password are required.");
 
@@ -106,6 +109,7 @@ async function submitAuthorize(request, env) {
   try {
     approved = await env.OAUTH_PROVIDER.approveConsent(request, handle, { scope: SCOPES });
   } catch (error) {
+    console.log(`[authorize] consent handle rejected: ${error.message}`);
     return html(messagePage("Authorization expired", error.message), 400);
   }
 
@@ -120,6 +124,7 @@ async function submitAuthorize(request, env) {
     props: { email, password, defaultList },
   });
 
+  console.log(`[authorize] approved for client ${approved.request.clientId}, redirecting to ${new URL(redirectTo).host}`);
   return redirect(redirectTo, approved.headers);
 }
 
