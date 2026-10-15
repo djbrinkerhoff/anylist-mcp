@@ -30,7 +30,7 @@ When an MCP client connects, you see a **Connect AnyList** page. Enter your AnyL
 
 ## Deploy
 
-Requires a Cloudflare account. The free plan works: Durable Objects with SQLite storage are included.
+Requires a Cloudflare account on the Workers Paid plan. On the free plan, requests fail with error 1102, because starting the AnyList client takes about 15–20 ms of CPU time and the free plan stops requests at 10 ms.
 
 ```bash
 git clone --recurse-submodules https://github.com/djbrinkerhoff/anylist-mcp.git
