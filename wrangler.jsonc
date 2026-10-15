@@ -30,5 +30,9 @@
   //   MCP_API_KEY, ANYLIST_EMAIL, ANYLIST_PASSWORD, ANYLIST_DEFAULT_LIST
   //                   — optional static API key for headless agents.
 
+  // Custom domain (must be a zone in your Cloudflare account). Remove this to
+  // deploy to *.workers.dev instead.
+  "routes": [{ "pattern": "example.com", "custom_domain": true }],
+
   "observability": { "enabled": true }
 }

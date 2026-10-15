@@ -55,7 +55,13 @@ If the domain is on Cloudflare DNS:
 npx wrangler deploy --domain anylist.example.com
 ```
 
-Or add it under **Workers & Pages → anylist-mcp → Settings → Domains & Routes**. Both the workers.dev URL and the custom domain work. Each issues tokens for its own hostname, so connect each client through one of them consistently.
+Or set it permanently in `wrangler.jsonc`:
+
+```jsonc
+"routes": [{ "pattern": "anylist.example.com", "custom_domain": true }]
+```
+
+With routes configured, the workers.dev URL is turned off unless you also set `"workers_dev": true`. Tokens are issued per hostname, so if you serve both, connect each client through one of them consistently.
 
 ## Connect agents
 
