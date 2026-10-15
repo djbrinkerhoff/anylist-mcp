@@ -32,7 +32,7 @@
 
   // Custom domain (must be a zone in your Cloudflare account). Remove this to
   // deploy to *.workers.dev instead.
-  "routes": [{ "pattern": "example.com", "custom_domain": true }],
+  "routes": [{ "pattern": "anylist.example.com", "custom_domain": true }],
 
   "observability": { "enabled": true }
 }
