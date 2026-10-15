@@ -80,6 +80,12 @@ function getProvider(origin) {
 
 export default {
   fetch(request, env, ctx) {
-    return getProvider(new URL(request.url).origin).fetch(request, env, ctx);
+    const url = new URL(request.url);
+    // OAuth requires HTTPS outside localhost; send plain-HTTP visitors there.
+    if (url.protocol === "http:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+      url.protocol = "https:";
+      return Response.redirect(url.toString(), 308);
+    }
+    return getProvider(url.origin).fetch(request, env, ctx);
   },
 };

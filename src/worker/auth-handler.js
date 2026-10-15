@@ -51,7 +51,7 @@ async function showAuthorize(request, env) {
 
   const consent = await env.OAUTH_PROVIDER.describeConsent(authRequest);
   const { handle, headers } = await env.OAUTH_PROVIDER.beginConsent(authRequest);
-  return html(authorizePage({ handle, consent }), 200, headers);
+  return html(authorizePage({ handle, consent, action: `${new URL(request.url).origin}/authorize` }), 200, headers);
 }
 
 async function submitAuthorize(request, env) {
@@ -75,7 +75,8 @@ async function submitAuthorize(request, env) {
   const email = String(form.get("email") || "").trim();
   const password = String(form.get("password") || "");
   const defaultList = String(form.get("default_list") || "").trim() || null;
-  const retry = error => html(authorizePage({ handle, consent, email, defaultList, error }), 400);
+  const action = `${new URL(request.url).origin}/authorize`;
+  const retry = error => html(authorizePage({ handle, consent, action, email, defaultList, error }), 400);
 
   if (!email || !password) return retry("AnyList email and password are required.");
 
@@ -185,7 +186,7 @@ function page(title, inner) {
 </html>`;
 }
 
-function authorizePage({ handle, consent, email = "", defaultList = "", error = "" }) {
+function authorizePage({ handle, consent, action, email = "", defaultList = "", error = "" }) {
   return page("Connect AnyList", `
     <h1>Connect AnyList</h1>
     <div class="client">
@@ -194,7 +195,7 @@ function authorizePage({ handle, consent, email = "", defaultList = "", error = 
     </div>
     ${consent.redirectIsLoopback ? `<div class="warn">This client redirects to your own computer (localhost). Only continue if you just started this connection.</div>` : ""}
     ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
-    <form method="POST" action="/authorize">
+    <form method="POST" action="${escapeHtml(action)}">
       <input type="hidden" name="handle" value="${escapeHtml(handle)}">
       <input type="hidden" name="client_name" value="${escapeHtml(consent.clientName)}">
       <input type="hidden" name="redirect_host" value="${escapeHtml(consent.redirectHost)}">
