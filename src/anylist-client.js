@@ -474,11 +474,39 @@ class AnyListClient {
           name: i.name || null,
           quantity: i.quantity || null,
           note: i.note || null,
+          isHeading: !!i.isHeading,
         })) : [],
         preparationSteps: recipe.preparationSteps || [],
       };
     } catch (error) {
       throw new Error(`Failed to get recipe details: ${error.message}`);
+    }
+  }
+
+  /**
+   * Every ingredient line of every recipe, with its recipe. Section headings
+   * ("For the sauce") are included with isHeading set.
+   */
+  async getAllIngredients() {
+    if (!this.client) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const recipes = await this.client.getRecipes();
+      return recipes.flatMap(r => (r.ingredients || []).map(i => {
+        const ing = i.toJSON();
+        return {
+          recipeId: r.identifier,
+          recipeName: r.name,
+          name: ing.name || null,
+          quantity: ing.quantity || null,
+          note: ing.note || null,
+          rawIngredient: ing.rawIngredient || null,
+          isHeading: !!ing.isHeading,
+        };
+      }));
+    } catch (error) {
+      throw new Error(`Failed to get ingredients: ${error.message}`);
     }
   }
 
@@ -623,27 +651,8 @@ class AnyListClient {
       }
 
       // Start from every existing field so nothing is lost on save, then
-      // override only the provided fields. Existing ingredients are serialized
-      // via toJSON() to preserve their identifiers and headings.
-      const merged = {
-        identifier: existing.identifier,
-        name: existing.name,
-        note: existing.note,
-        sourceName: existing.sourceName,
-        sourceUrl: existing.sourceUrl,
-        prepTime: existing.prepTime,
-        cookTime: existing.cookTime,
-        servings: existing.servings,
-        rating: existing.rating,
-        nutritionalInfo: existing.nutritionalInfo,
-        scaleFactor: existing.scaleFactor,
-        paprikaIdentifier: existing.paprikaIdentifier,
-        creationTimestamp: existing.creationTimestamp,
-        photoIds: existing.photoIds,
-        photoUrls: existing.photoUrls,
-        preparationSteps: existing.preparationSteps,
-        ingredients: existing.ingredients.map(i => i.toJSON()),
-      };
+      // override only the provided fields.
+      const merged = this._recipeFields(existing);
 
       for (const key of ['name', 'note', 'sourceName', 'sourceUrl', 'prepTime', 'cookTime', 'servings', 'preparationSteps']) {
         if (fields[key] !== undefined) merged[key] = fields[key];
@@ -663,6 +672,84 @@ class AnyListClient {
       return { identifier: recipe.identifier, name: recipe.name };
     } catch (error) {
       throw new Error(`Failed to update recipe: ${error.message}`);
+    }
+  }
+
+  /**
+   * Every stored field of a recipe, ready to save back. Existing ingredients
+   * are serialized via toJSON() to preserve their identifiers and headings.
+   */
+  _recipeFields(existing) {
+    return {
+      identifier: existing.identifier,
+      name: existing.name,
+      note: existing.note,
+      sourceName: existing.sourceName,
+      sourceUrl: existing.sourceUrl,
+      prepTime: existing.prepTime,
+      cookTime: existing.cookTime,
+      servings: existing.servings,
+      rating: existing.rating,
+      nutritionalInfo: existing.nutritionalInfo,
+      scaleFactor: existing.scaleFactor,
+      paprikaIdentifier: existing.paprikaIdentifier,
+      creationTimestamp: existing.creationTimestamp,
+      photoIds: existing.photoIds,
+      photoUrls: existing.photoUrls,
+      preparationSteps: existing.preparationSteps,
+      ingredients: existing.ingredients.map(i => i.toJSON()),
+    };
+  }
+
+  /**
+   * Edit individual ingredient lines in place, across any number of recipes.
+   * Each change finds a line by its current text (`match`, exact) in recipe
+   * `recipeId` and sets only the fields it provides: `text` (the line as
+   * shown), `name`, `quantity`, `note`, `isHeading`. Everything else,
+   * including the ingredient's identifier and position, is kept. When the
+   * same text appears more than once in a recipe, successive changes take
+   * successive occurrences.
+   * @returns {{ recipesSaved: number, linesChanged: number, unmatched: object[] }}
+   */
+  async updateIngredients(changes) {
+    if (!this.client) {
+      throw new Error('Not connected. Call connect() first.');
+    }
+    try {
+      const recipes = await this.client.getRecipes();
+      const byRecipe = new Map();
+      for (const c of changes) {
+        if (!byRecipe.has(c.recipeId)) byRecipe.set(c.recipeId, []);
+        byRecipe.get(c.recipeId).push(c);
+      }
+      let recipesSaved = 0, linesChanged = 0;
+      const unmatched = [];
+      for (const [recipeId, list] of byRecipe) {
+        const existing = recipes.find(r => r.identifier === recipeId);
+        if (!existing) { unmatched.push(...list.map(c => ({ ...c, reason: 'recipe not found' }))); continue; }
+        const fields = this._recipeFields(existing);
+        const used = new Set();
+        let changed = 0;
+        for (const c of list) {
+          const idx = fields.ingredients.findIndex((ing, k) => !used.has(k) && ing.rawIngredient === c.match);
+          if (idx === -1) { unmatched.push({ ...c, reason: 'line not found' }); continue; }
+          used.add(idx);
+          const ing = fields.ingredients[idx];
+          if (c.text !== undefined) ing.rawIngredient = c.text;
+          for (const key of ['name', 'quantity', 'note', 'isHeading']) {
+            if (c[key] !== undefined) ing[key] = c[key];
+          }
+          changed++;
+        }
+        if (changed === 0) continue;
+        const recipe = await this.client.createRecipe(fields);
+        await recipe.save();
+        recipesSaved++; linesChanged += changed;
+      }
+      console.error(`Updated ${linesChanged} ingredient lines in ${recipesSaved} recipes`);
+      return { recipesSaved, linesChanged, unmatched };
+    } catch (error) {
+      throw new Error(`Failed to update ingredients: ${error.message}`);
     }
   }
 

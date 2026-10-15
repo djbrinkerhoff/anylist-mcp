@@ -51,6 +51,16 @@ describe('recipes tool', () => {
       assert.ok(result.content[0].text.includes('Boil water'));
     });
 
+    it('shows ingredient lines from quantity, name and note, and headings in bold', async () => {
+      client._recipes.push({ identifier: 'r-1', name: 'Cake', ingredients: [
+        { isHeading: true, name: 'For the batter' },
+        { rawIngredient: '1 cup/225 grams unsalted butter (2 sticks), softened', quantity: '1 cup/225 grams', name: 'unsalted butter', note: '2 sticks, softened' },
+      ] });
+      const text = (await handlers.recipes({ action: 'get', name: 'Cake' })).content[0].text;
+      assert.ok(text.includes('- **For the batter**'));
+      assert.ok(text.includes('- 1 cup/225 grams unsalted butter — 2 sticks, softened'));
+    });
+
     it('returns error for non-existent recipe', async () => {
       const result = await handlers.recipes({ action: 'get', name: 'Nope' });
       assert.equal(result.isError, true);
@@ -239,6 +249,67 @@ describe('recipes tool', () => {
       const result = await handlers.recipes({ action: 'delete', recipe_id: 'r-2' });
       assert.ok(result.content[0].text.includes('Deleted recipe'));
       assert.deepEqual(client._recipes.map(r => r.identifier), ['r-1']);
+    });
+  });
+
+  describe('list_ingredients', () => {
+    beforeEach(() => {
+      client._recipes.push({ identifier: 'r-1', name: 'Pasta', ingredients: [
+        { isHeading: true, rawIngredient: 'For the sauce' },
+        { name: 'garlic cloves', quantity: '2', note: 'minced', rawIngredient: '2 garlic cloves, minced' },
+      ] }, { identifier: 'r-2', name: 'Soup', ingredients: [{ name: 'Garlic', quantity: '1 head', rawIngredient: '1 head Garlic' }] });
+    });
+
+    it('lists every line as tab-separated rows', async () => {
+      const text = (await handlers.recipes({ action: 'list_ingredients' })).content[0].text;
+      assert.ok(text.startsWith('Ingredients (3)'));
+      assert.ok(text.includes('r-1\theading\t\t\t\tFor the sauce'));
+      assert.ok(text.includes('r-1\tingredient\tgarlic cloves\t2\tminced\t2 garlic cloves, minced'));
+    });
+
+    it('filters by name or text with search', async () => {
+      const text = (await handlers.recipes({ action: 'list_ingredients', search: 'garlic' })).content[0].text;
+      assert.ok(text.startsWith('Ingredients (2)'));
+      assert.ok(!text.includes('For the sauce'));
+    });
+  });
+
+  describe('update_ingredients', () => {
+    beforeEach(() => {
+      client._recipes.push({ identifier: 'r-1', name: 'Cake', ingredients: [
+        { identifier: 'i-1', name: 'cup/225 grams unsalted butter, softened', quantity: '1', rawIngredient: '1 cup/225 grams unsalted butter, softened' },
+        { identifier: 'i-2', name: 'eggs', quantity: '2', rawIngredient: '2 eggs' },
+        { identifier: 'i-3', name: 'eggs', quantity: '2', rawIngredient: '2 eggs' },
+      ] });
+    });
+
+    it('changes only the given fields of the matched line', async () => {
+      const result = await handlers.recipes({ action: 'update_ingredients', ingredient_changes: [
+        { recipe_id: 'r-1', match: '1 cup/225 grams unsalted butter, softened', name: 'unsalted butter', quantity: '1 cup/225 grams', note: 'softened' },
+      ] });
+      assert.ok(result.content[0].text.includes('Updated 1 ingredient lines in 1 recipes'));
+      assert.deepEqual(client._recipes[0].ingredients[0], {
+        identifier: 'i-1', name: 'unsalted butter', quantity: '1 cup/225 grams', note: 'softened', rawIngredient: '1 cup/225 grams unsalted butter, softened',
+      });
+    });
+
+    it('takes repeated lines in order and reports lines it could not find', async () => {
+      const result = await handlers.recipes({ action: 'update_ingredients', ingredient_changes: [
+        { recipe_id: 'r-1', match: '2 eggs', note: 'first' },
+        { recipe_id: 'r-1', match: '2 eggs', note: 'second' },
+        { recipe_id: 'r-1', match: '3 eggs', note: 'x' },
+        { recipe_id: 'r-9', match: '2 eggs', note: 'x' },
+      ] });
+      const text = result.content[0].text;
+      assert.deepEqual(client._recipes[0].ingredients.slice(1).map(i => i.note), ['first', 'second']);
+      assert.ok(text.includes('Not changed (2)'));
+      assert.ok(text.includes('"3 eggs" (line not found)'));
+      assert.ok(text.includes('r-9: "2 eggs" (recipe not found)'));
+    });
+
+    it('requires ingredient_changes', async () => {
+      const result = await handlers.recipes({ action: 'update_ingredients' });
+      assert.equal(result.isError, true);
     });
   });
 

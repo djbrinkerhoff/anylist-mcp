@@ -158,6 +158,35 @@ export class MockAnyListClient {
     this._recipes.splice(this._recipes.indexOf(this._findRecipe(name, id)), 1);
   }
 
+  async updateIngredients(changes) {
+    let recipesSaved = 0, linesChanged = 0; const unmatched = [];
+    const byRecipe = new Map();
+    for (const c of changes) byRecipe.set(c.recipeId, [...(byRecipe.get(c.recipeId) || []), c]);
+    for (const [id, list] of byRecipe) {
+      const r = this._recipes.find(x => x.identifier === id);
+      if (!r) { unmatched.push(...list.map(c => ({ ...c, reason: 'recipe not found' }))); continue; }
+      const used = new Set(); let changed = 0;
+      for (const c of list) {
+        const idx = (r.ingredients || []).findIndex((ing, k) => !used.has(k) && ing.rawIngredient === c.match);
+        if (idx === -1) { unmatched.push({ ...c, reason: 'line not found' }); continue; }
+        used.add(idx);
+        const ing = r.ingredients[idx];
+        if (c.text !== undefined) ing.rawIngredient = c.text;
+        for (const key of ['name', 'quantity', 'note', 'isHeading']) if (c[key] !== undefined) ing[key] = c[key];
+        changed++;
+      }
+      if (changed) { recipesSaved++; linesChanged += changed; }
+    }
+    return { recipesSaved, linesChanged, unmatched };
+  }
+
+  async getAllIngredients() {
+    return this._recipes.flatMap(r => (r.ingredients || []).map(i => ({
+      recipeId: r.identifier, recipeName: r.name, name: i.name || null, quantity: i.quantity || null,
+      note: i.note || null, rawIngredient: i.rawIngredient || null, isHeading: !!i.isHeading,
+    })));
+  }
+
   async importRecipeFromUrl(url) {
     if (!this._pendingImport) throw new Error('Could not parse recipe from URL. The site may not be supported.');
     const imp = this._pendingImport;

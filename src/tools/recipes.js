@@ -19,13 +19,15 @@ export function register(server, getClient) {
 - delete: Delete a recipe by name or recipe_id
 When several recipes share a name, get/update/delete fail and list their ids; pass recipe_id to pick one.
 - import_url: Import a recipe from a website URL (parses ingredients, steps, etc.)
-- normalize: Preview/parse a recipe from a URL or raw text without saving (set save=true to also save)`,
+- normalize: Preview/parse a recipe from a URL or raw text without saving (set save=true to also save)
+- list_ingredients: Every ingredient line across all recipes (recipe id, name, quantity, note, text). Use 'search' to filter by name or text.
+- update_ingredients: Edit ingredient lines in place across recipes. Each change names a recipe_id and the line's current text ('match'), then any of text, name, quantity, note, is_heading. Other fields and the line's position are kept.`,
     inputSchema: {
-      action: z.enum(["list", "get", "create", "update", "delete", "import_url", "normalize"]).describe("The recipe action to perform"),
+      action: z.enum(["list", "get", "create", "update", "delete", "import_url", "normalize", "list_ingredients", "update_ingredients"]).describe("The recipe action to perform"),
       name: z.string().optional().describe("Recipe name (required for create; get, update, delete need name or recipe_id)"),
       recipe_id: z.string().optional().describe("Recipe id from list (get, update, delete); takes precedence over name"),
       new_name: z.string().optional().describe("New name for the recipe (update only)"),
-      search: z.string().optional().describe("Search query to filter recipes (list only)"),
+      search: z.string().optional().describe("Search query to filter recipes (list) or ingredients by name or text (list_ingredients)"),
       ingredients: z.array(z.object({
         name: z.string().describe("Ingredient name, e.g. 'flour'"),
         quantity: z.string().describe("Quantity with unit, e.g. '2 cups'"),
@@ -40,9 +42,18 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
       url: z.string().optional().describe("URL to import recipe from (import_url, normalize)"),
       text: z.string().optional().describe("Raw recipe text to parse (normalize only)"),
       save: z.boolean().optional().describe("If true, also save normalized recipe to AnyList (normalize only, default false)"),
+      ingredient_changes: z.array(z.object({
+        recipe_id: z.string().describe("Recipe id from list"),
+        match: z.string().describe("The line's current text, exactly as list_ingredients shows it"),
+        text: z.string().optional().describe("New line text, as shown in the recipe"),
+        name: z.string().optional().describe("New ingredient name"),
+        quantity: z.string().optional().describe("New quantity"),
+        note: z.string().optional().describe("New note"),
+        is_heading: z.boolean().optional().describe("Make the line a section heading (true) or an ingredient (false)"),
+      })).max(500).optional().describe("Ingredient edits (update_ingredients only), at most 500 per call"),
     }
   }, async (params) => {
-    const { action, name, recipe_id, new_name, search, ingredients, steps, note, source_name, source_url, prep_time, cook_time, servings, url, text: recipeText, save: saveRecipe } = params;
+    const { action, name, recipe_id, ingredient_changes, new_name, search, ingredients, steps, note, source_name, source_url, prep_time, cook_time, servings, url, text: recipeText, save: saveRecipe } = params;
     try {
       const client = await getClient();
       await client.connect(null);
@@ -61,6 +72,29 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
           }).join('\n');
           return textResponse(`Recipes (${recipes.length}):\n${list}`);
         }
+        case "update_ingredients": {
+          if (!ingredient_changes || ingredient_changes.length === 0) throw new Error('Action "update_ingredients" requires "ingredient_changes"');
+          const result = await client.updateIngredients(ingredient_changes.map(c => ({
+            recipeId: c.recipe_id, match: c.match, text: c.text, name: c.name, quantity: c.quantity, note: c.note, isHeading: c.is_heading,
+          })));
+          let text = `Updated ${result.linesChanged} ingredient lines in ${result.recipesSaved} recipes`;
+          if (result.unmatched.length > 0) {
+            text += `\nNot changed (${result.unmatched.length}):\n` + result.unmatched.map(u => `- ${u.recipeId}: "${u.match}" (${u.reason})`).join('\n');
+          }
+          return textResponse(text);
+        }
+        case "list_ingredients": {
+          let ingredients = await client.getAllIngredients();
+          if (search) {
+            const q = search.toLowerCase();
+            ingredients = ingredients.filter(i => [i.name, i.rawIngredient].some(v => v && v.toLowerCase().includes(q)));
+          }
+          if (ingredients.length === 0) return textResponse(search ? `No ingredients found matching "${search}".` : "No ingredients found.");
+          // Tab-separated so large exports stay easy to parse.
+          const clean = v => (v || '').replace(/[\t\n]/g, ' ');
+          const rows = ingredients.map(i => [i.recipeId, i.isHeading ? 'heading' : 'ingredient', i.name, i.quantity, i.note, i.rawIngredient].map(clean).join('\t'));
+          return textResponse(`Ingredients (${ingredients.length})\nrecipe_id\tkind\tname\tquantity\tnote\ttext\n${rows.join('\n')}`);
+        }
         case "get": {
           let getRecipeName = name;
           if (!getRecipeName && !recipe_id) getRecipeName = await elicitRequiredField("name", "Which recipe would you like to view?");
@@ -77,7 +111,11 @@ When several recipes share a name, get/update/delete fail and list their ids; pa
           if (recipe.ingredients.length > 0) {
             text += `\n## Ingredients\n`;
             recipe.ingredients.forEach(i => {
-              text += `- ${i.rawIngredient || [i.quantity, i.name, i.note].filter(Boolean).join(' ')}\n`;
+              // Show lines the way AnyList does: built from quantity, name and note.
+              // The stored text is only a fallback for lines without a name.
+              if (i.isHeading) text += `- **${i.name || i.rawIngredient}**\n`;
+              else if (i.name) text += `- ${[i.quantity, i.name].filter(Boolean).join(' ')}${i.note ? ` — ${i.note}` : ''}\n`;
+              else text += `- ${i.rawIngredient || ''}\n`;
             });
           }
           if (recipe.preparationSteps.length > 0) {

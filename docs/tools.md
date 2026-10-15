@@ -86,7 +86,7 @@ Manage AnyList recipes, including URL import and text parsing.
 | `name` | string | For most actions | Recipe name |
 | `recipe_id` | string | No | Recipe ID from `list` (get, update, delete) — use when several recipes share a name |
 | `new_name` | string | No | Rename the recipe (update only) |
-| `search` | string | No | Filter recipes by name (list only) |
+| `search` | string | No | Filter recipes by name (list), or ingredients by name or text (list_ingredients) |
 | `ingredients` | array | No | `[{ name, quantity }]` (create, update — replaces list on update) |
 | `steps` | string[] | No | Preparation steps (create, update — replaces list on update) |
 | `note` | string | No | Recipe notes (create, update) |
@@ -98,6 +98,7 @@ Manage AnyList recipes, including URL import and text parsing.
 | `url` | string | For import/normalize | URL to fetch recipe from |
 | `text` | string | For normalize | Raw recipe text to parse |
 | `save` | boolean | No | Save normalized result to AnyList (normalize only) |
+| `ingredient_changes` | array | For update_ingredients | Up to 500 `{ recipe_id, match, text?, name?, quantity?, note?, is_heading? }` |
 
 **Actions:**
 
@@ -134,6 +135,19 @@ Manage AnyList recipes, including URL import and text parsing.
 
 // Delete a recipe
 { "name": "recipes", "arguments": { "action": "delete", "name": "Simple Pasta" } }
+
+// Every ingredient line across all recipes, as tab-separated rows
+// (recipe id, kind, name, quantity, note, stored text). search filters by name or text.
+{ "name": "recipes", "arguments": { "action": "list_ingredients", "search": "garlic" } }
+
+// Edit ingredient lines in place. Each change finds a line by its current stored text
+// ("match") in one recipe and sets only the fields given; the line keeps its position.
+// AnyList displays lines from quantity, name and note, and adds the name to shopping lists.
+{ "name": "recipes", "arguments": { "action": "update_ingredients", "ingredient_changes": [
+    { "recipe_id": "<id>", "match": "1 cup/225 grams unsalted butter (2 sticks), softened",
+      "name": "unsalted butter", "quantity": "1 cup/225 grams", "note": "2 sticks, softened" },
+    { "recipe_id": "<id>", "match": "For the Filling", "is_heading": true, "name": "For the Filling" }
+] } }
 
 // Import a recipe from a website URL
 { "name": "recipes", "arguments": { "action": "import_url", "url": "https://..." } }
