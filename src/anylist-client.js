@@ -3,16 +3,26 @@ import { normalizeRecipe } from './recipe-normalizer.js';
 
 class AnyListClient {
   /**
-   * @param {{ username?: string, password?: string, defaultListName?: string }} [credentials]
+   * @param {object} [options]
+   * @param {string} [options.username]
+   * @param {string} [options.password]
+   * @param {string} [options.defaultListName]
    *   Optional credentials. Falls back to ANYLIST_USERNAME / ANYLIST_PASSWORD / ANYLIST_LIST_NAME
    *   environment variables when not provided (stdio mode).
+   * @param {(opts: { email: string, password: string }) => AnyList} [options.createAnyList]
+   *   Factory for the underlying AnyList instance (e.g. one that persists tokens somewhere
+   *   other than the filesystem). Defaults to `new AnyList(...)`.
+   * @param {boolean} [options.connectWebSocket=true]
+   *   Whether to open AnyList's realtime WebSocket on login. Not needed for MCP tool calls.
    */
-  constructor({ username, password, defaultListName } = {}) {
+  constructor({ username, password, defaultListName, createAnyList, connectWebSocket = true } = {}) {
     this.client = null;
     this.targetList = null;
     this._username = username || null;
     this._password = password || null;
     this.defaultListName = defaultListName || null;
+    this._createAnyList = createAnyList || (opts => new AnyList(opts));
+    this._connectWebSocket = connectWebSocket;
   }
 
   async connect(listName = null) {
@@ -40,14 +50,14 @@ class AnyListClient {
     try {
       // Create AnyList client if not already authenticated
       if (!this.client) {
-        this.client = new AnyList({
+        this.client = this._createAnyList({
           email: username,
           password: password
         });
 
         // Authenticate
         console.error(`Connecting to AnyList as ${username}...`);
-        await this.client.login();
+        await this.client.login(this._connectWebSocket);
         console.error('Successfully authenticated with AnyList');
 
         await this.client.getLists();
@@ -71,6 +81,19 @@ class AnyListClient {
       const wrappedError = new Error(`Failed to connect to AnyList: ${error.message}`);
       console.error(wrappedError.message);
       throw wrappedError;
+    }
+  }
+
+  /**
+   * Re-fetch lists from AnyList and re-point targetList at the fresh copy.
+   * Without the realtime WebSocket, this is how long-lived sessions pick up
+   * changes made in the AnyList apps.
+   */
+  async refresh() {
+    if (!this.client) return;
+    await this.client.getLists();
+    if (this.targetList) {
+      this.targetList = this.client.getListByName(this.targetList.name) || null;
     }
   }
 

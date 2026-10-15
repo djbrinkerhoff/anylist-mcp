@@ -27,3 +27,7 @@ Thumbs.db
 # Config directory with real allowed emails (copy of example with real emails)
 /config/
 allowed-emails.txt
+# Cloudflare Workers
+.dev.vars*
+!.dev.vars.example
+.wrangler/

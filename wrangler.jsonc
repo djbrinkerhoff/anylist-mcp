@@ -1,0 +1,34 @@
+// Cloudflare Workers deployment. See docs/cloudflare-workers.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anylist-mcp",
+  "main": "src/worker/index.js",
+  "compatibility_date": "2026-10-01",
+  // global_fetch_strictly_public is required for Client ID Metadata Documents
+  // (how newer MCP clients identify themselves instead of registering).
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  // anylist-js is written for Node. Swap its Node-only dependencies for
+  // fetch-based stand-ins; the library itself is used unmodified.
+  "alias": {
+    "got": "./src/worker/shims/got.cjs",
+    "form-data": "./src/worker/shims/form-data.cjs",
+    "ws": "./src/worker/shims/ws.cjs",
+    "reconnecting-websocket": "./src/worker/shims/ws.cjs"
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "AnyListMCP" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AnyListMCP"] }],
+
+  // OAuth clients, grants and tokens, plus cached AnyList tokens.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+
+  // Secrets (set with `npx wrangler secret put NAME`, or .dev.vars locally):
+  //   ALLOWED_EMAILS  — required. Comma-separated AnyList emails allowed to sign in.
+  //   MCP_API_KEY, ANYLIST_EMAIL, ANYLIST_PASSWORD, ANYLIST_DEFAULT_LIST
+  //                   — optional static API key for headless agents.
+
+  "observability": { "enabled": true }
+}

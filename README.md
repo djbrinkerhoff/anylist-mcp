@@ -95,6 +95,22 @@ make dev
 
 ---
 
+## Installation: Cloudflare Workers (serverless)
+
+Run the server on Cloudflare Workers instead of Docker: no machine to keep on, no database. You sign in with your AnyList account. Agents connect over OAuth or, for headless use, a static API key.
+
+```bash
+git clone --recurse-submodules https://github.com/djbrinkerhoff/anylist-mcp.git
+cd anylist-mcp && npm install
+npx wrangler login
+npx wrangler secret put ALLOWED_EMAILS     # your AnyList email
+npm run deploy:worker                      # → https://anylist-mcp.<you>.workers.dev/mcp
+```
+
+See **[docs/cloudflare-workers.md](docs/cloudflare-workers.md)** for custom domains, connecting Claude/Claude Code/other agents, and API-key setup.
+
+---
+
 ## Generating OAuth Client Credentials (for Home Assistant / headless clients)
 
 Some MCP clients — like Home Assistant — require a pre-registered `client_id` and `client_secret` rather than dynamic client registration. You create a confidential client once, then enter the credentials in your integration. Home Assistant will still send you through a one-time browser login (authorization code flow) to link your account.

@@ -1,0 +1,12 @@
+# Local secrets for `npm run dev:worker`. Copy to .dev.vars (gitignored).
+# In production, set each with: npx wrangler secret put NAME
+
+# Required: AnyList emails allowed to sign in (comma-separated).
+ALLOWED_EMAILS=you@example.com
+
+# Optional: static API key for headless agents that can't do OAuth.
+# Generate with: openssl rand -hex 32
+# MCP_API_KEY=
+# ANYLIST_EMAIL=you@example.com
+# ANYLIST_PASSWORD=
+# ANYLIST_DEFAULT_LIST=Groceries
